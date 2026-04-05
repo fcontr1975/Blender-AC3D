@@ -27,6 +27,28 @@ You'll need to enable the script in the user preferences window after installing
 ## Uh, I've done all that how do I use it?
 Go to File->Import->AC3D (.ac), select a file, adapt the import settings to your liking, and let it do the work.
 
+## AC3D Material Panel (Blender Material tab)
+A dedicated AC3D panel is available in the Blender Material Properties tab.
+
+It lets you set AC3D material properties explicitly per material:
+- AC3D Name
+- RGB (diffuse)
+- Ambient
+- Emissive
+- Specular
+- Shininess (0-128)
+- Transparency (0-1)
+
+Panel controls:
+- `Use AC3D Values`: exporter uses the panel values directly.
+- `Auto Mirror To Blender`: changing AC3D values updates supported Blender material values.
+- `Read Blender Material`: copies current Blender shader/material values into AC3D values.
+- `Write To Blender Material`: applies AC3D values back to supported Blender material/shader fields.
+
+Importer/exporter integration:
+- Imported AC3D materials populate this panel automatically.
+- Export can use either Blender-derived values (default) or explicit AC3D panel values.
+
 ## AC3D versions
 AC3Db supported for import and export.
 AC3Dc supported for import.
@@ -41,6 +63,10 @@ When exporting lines, they will always be smooth shaded, due to limitations in B
 When exporting lines they will have the DefaultWhite material, except if their Blender object has only 1 and only 1 material, then they will be assigned that. This is due to Blender limitation.
 
 Exporter will export all materials in object material slots, even if they are not referenced. Good if you had a material you might want to assign to something later. Also annoying cause it potentially can clutter up the AC3D file with unused materials.
+
+## Recent compatibility fixes
+- Importer handles AC3D material shininess values that are written as floats and safely maps them to panel properties.
+- Importer no longer requires `Mesh.set_sharp_from_angle` to exist; it falls back to auto-smooth properties when needed on older/different Blender APIs.
 
 ## Things to come:
 * I want to have an option to overwrite, or to prompt the operator if they want to overwrite textures on an export

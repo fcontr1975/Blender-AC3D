@@ -25,11 +25,12 @@
 import time
 import datetime
 from math import radians
+import re
 
 import bpy
-from bpy.types import Operator, TOPBAR_MT_file_import, TOPBAR_MT_file_export
+from bpy.types import Operator, Panel, PropertyGroup, TOPBAR_MT_file_import, TOPBAR_MT_file_export
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, \
-    FloatVectorProperty, StringProperty
+    FloatVectorProperty, IntProperty, PointerProperty, StringProperty
 from bpy_extras.io_utils import ImportHelper, ExportHelper, axis_conversion
 from mathutils import Euler
 
@@ -64,6 +65,355 @@ def menu_func_import(self, context):
 
 def menu_func_export(self, context):
     self.layout.operator(AC3D_OT_Export.bl_idname, text='AC3D (.ac)')
+
+
+def _get_material_output_shader_node(bl_mat):
+    if not bl_mat or not bl_mat.use_nodes or not bl_mat.node_tree:
+        return None
+
+    output = next(
+        (n for n in bl_mat.node_tree.nodes
+         if n.type == 'OUTPUT_MATERIAL' and n.is_active_output),
+        None)
+    if output and 'Surface' in output.inputs and output.inputs['Surface'].links:
+        return output.inputs['Surface'].links[0].from_node
+
+    if bl_mat.node_tree.links:
+        return bl_mat.node_tree.links[0].from_node
+
+    return None
+
+
+def _ac3d_values_from_blender_material(bl_mat):
+    values = {
+        'name': re.sub('["]', '', bl_mat.name),
+        'rgb': [1.0, 1.0, 1.0],
+        'amb': [0.2, 0.2, 0.2],
+        'emis': [0.0, 0.0, 0.0],
+        'spec': [0.5, 0.5, 0.5],
+        'shi': 64,
+        'trans': 0.0,
+    }
+
+    rough = 0.5
+    try:
+        curr_shader = _get_material_output_shader_node(bl_mat)
+        if curr_shader and curr_shader.type == 'BSDF_PRINCIPLED':
+            principled = curr_shader
+            emis_color = principled.inputs['Emission Color']
+            emis_strength = principled.inputs['Emission Strength'].default_value
+            if emis_strength == 0.0:
+                values['emis'] = [0.0, 0.0, 0.0]
+            else:
+                values['emis'] = [
+                    emis_color.default_value[0],
+                    emis_color.default_value[1],
+                    emis_color.default_value[2],
+                ]
+
+            alpha = principled.inputs['Alpha']
+            values['trans'] = 1.0 - alpha.default_value
+            rough = 1.0 - principled.inputs['Roughness'].default_value
+
+            base = principled.inputs['Base Color']
+            if not base.links:
+                values['rgb'] = [
+                    base.default_value[0],
+                    base.default_value[1],
+                    base.default_value[2],
+                ]
+
+            specu = principled.inputs['Specular Tint']
+            values['spec'] = [
+                specu.default_value[0],
+                specu.default_value[1],
+                specu.default_value[2],
+            ]
+
+        elif curr_shader and curr_shader.type == 'BSDF_DIFFUSE':
+            diffuse = curr_shader
+            rough = 1.0 - diffuse.inputs['Roughness'].default_value
+            base = diffuse.inputs['Color']
+            if not base.links:
+                values['rgb'] = [
+                    base.default_value[0],
+                    base.default_value[1],
+                    base.default_value[2],
+                ]
+
+        elif curr_shader and curr_shader.type == 'EEVEE_EMISSION':
+            emission = curr_shader
+            emis = emission.inputs['Strength'].default_value
+            base = emission.inputs['Color'].default_value
+            values['emis'] = [emis * base[0], emis * base[1], emis * base[2]]
+            values['rgb'] = [0.0, 0.0, 0.0]
+            values['amb'] = [0.0, 0.0, 0.0]
+            values['spec'] = [0.0, 0.0, 0.0]
+            rough = 0.5
+            values['trans'] = 0.0
+
+        elif curr_shader and curr_shader.type == 'EEVEE_SPECULAR':
+            specular = curr_shader
+            emis_color = specular.inputs['Emissive Color'].default_value
+            values['emis'] = [emis_color[0], emis_color[1], emis_color[2]]
+            values['trans'] = specular.inputs['Transparency'].default_value
+            rough = 1.0 - specular.inputs['Roughness'].default_value
+
+            base = specular.inputs['Base Color']
+            if not base.links:
+                values['rgb'] = [
+                    base.default_value[0],
+                    base.default_value[1],
+                    base.default_value[2],
+                ]
+
+            specu = specular.inputs['Specular'].default_value
+            values['spec'] = [specu[0], specu[1], specu[2]]
+
+        else:
+            values['spec'] = list(bl_mat.specular_intensity * bl_mat.specular_color)
+            rough = 1.0 - bl_mat.roughness
+            values['rgb'] = [
+                bl_mat.diffuse_color[0],
+                bl_mat.diffuse_color[1],
+                bl_mat.diffuse_color[2],
+            ]
+            values['trans'] = 1.0 - bl_mat.diffuse_color[3]
+
+    except Exception:
+        values['spec'] = list(bl_mat.specular_intensity * bl_mat.specular_color)
+        rough = 1.0 - bl_mat.roughness
+        values['rgb'] = [
+            bl_mat.diffuse_color[0],
+            bl_mat.diffuse_color[1],
+            bl_mat.diffuse_color[2],
+        ]
+        values['trans'] = 1.0 - bl_mat.diffuse_color[3]
+
+    rough = min(1.0, max(0.0, rough))
+    values['shi'] = int(round(rough * 128.0, 0))
+    return values
+
+
+def _apply_ac3d_values_to_blender_material(bl_mat, ac3d_props):
+    roughness = 1.0 - (float(ac3d_props.shi) / 128.0)
+    roughness = min(1.0, max(0.0, roughness))
+    alpha = 1.0 - ac3d_props.trans
+    alpha = min(1.0, max(0.0, alpha))
+
+    bl_mat.roughness = roughness
+    bl_mat.diffuse_color = (
+        ac3d_props.rgb[0],
+        ac3d_props.rgb[1],
+        ac3d_props.rgb[2],
+        alpha,
+    )
+    bl_mat.specular_intensity = (
+        ac3d_props.spec[0] + ac3d_props.spec[1] + ac3d_props.spec[2]) / 3.0
+
+    shader = _get_material_output_shader_node(bl_mat)
+    if not shader:
+        return
+
+    if shader.type == 'BSDF_PRINCIPLED':
+        shader.inputs['Base Color'].default_value = (
+            ac3d_props.rgb[0],
+            ac3d_props.rgb[1],
+            ac3d_props.rgb[2],
+            1.0,
+        )
+        shader.inputs['Emission Color'].default_value = (
+            ac3d_props.emis[0],
+            ac3d_props.emis[1],
+            ac3d_props.emis[2],
+            1.0,
+        )
+        shader.inputs['Emission Strength'].default_value = 0.0 if (
+            ac3d_props.emis[0] == 0.0 and
+            ac3d_props.emis[1] == 0.0 and
+            ac3d_props.emis[2] == 0.0) else 1.0
+        shader.inputs['Alpha'].default_value = alpha
+        shader.inputs['Roughness'].default_value = roughness
+        shader.inputs['Specular Tint'].default_value = (
+            ac3d_props.spec[0],
+            ac3d_props.spec[1],
+            ac3d_props.spec[2],
+            1.0,
+        )
+    elif shader.type == 'EEVEE_SPECULAR':
+        shader.inputs['Base Color'].default_value = (
+            ac3d_props.rgb[0],
+            ac3d_props.rgb[1],
+            ac3d_props.rgb[2],
+            1.0,
+        )
+        shader.inputs['Emissive Color'].default_value = (
+            ac3d_props.emis[0],
+            ac3d_props.emis[1],
+            ac3d_props.emis[2],
+            1.0,
+        )
+        shader.inputs['Transparency'].default_value = ac3d_props.trans
+        shader.inputs['Roughness'].default_value = roughness
+        shader.inputs['Specular'].default_value = (
+            ac3d_props.spec[0],
+            ac3d_props.spec[1],
+            ac3d_props.spec[2],
+            1.0,
+        )
+
+
+def _ac3d_props_update(self, context):
+    bl_mat = self.id_data
+    if not isinstance(bl_mat, bpy.types.Material):
+        return
+    if self.mirror_to_blender:
+        _apply_ac3d_values_to_blender_material(bl_mat, self)
+
+
+class AC3D_MaterialProperties(PropertyGroup):
+    use_ac3d_properties: BoolProperty(
+        name="Use AC3D Values",
+        description="Use explicit AC3D values from this panel during export",
+        default=False,
+    )
+    mirror_to_blender: BoolProperty(
+        name="Auto Mirror To Blender",
+        description="When enabled, AC3D edits update the Blender material where supported",
+        default=False,
+        update=_ac3d_props_update,
+    )
+    name: StringProperty(
+        name="AC3D Name",
+        description="Name written to MATERIAL in AC3D",
+        default="",
+        update=_ac3d_props_update,
+    )
+    rgb: FloatVectorProperty(
+        name="RGB",
+        description="Diffuse RGB",
+        subtype='COLOR',
+        min=0.0,
+        max=1.0,
+        default=(1.0, 1.0, 1.0),
+        update=_ac3d_props_update,
+    )
+    amb: FloatVectorProperty(
+        name="Ambient",
+        description="Ambient RGB",
+        subtype='COLOR',
+        min=0.0,
+        max=1.0,
+        default=(0.2, 0.2, 0.2),
+        update=_ac3d_props_update,
+    )
+    emis: FloatVectorProperty(
+        name="Emissive",
+        description="Emissive RGB",
+        subtype='COLOR',
+        min=0.0,
+        max=1.0,
+        default=(0.0, 0.0, 0.0),
+        update=_ac3d_props_update,
+    )
+    spec: FloatVectorProperty(
+        name="Specular",
+        description="Specular RGB",
+        subtype='COLOR',
+        min=0.0,
+        max=1.0,
+        default=(0.5, 0.5, 0.5),
+        update=_ac3d_props_update,
+    )
+    shi: IntProperty(
+        name="Shininess",
+        description="AC3D shininess (0-128)",
+        min=0,
+        max=128,
+        default=64,
+        update=_ac3d_props_update,
+    )
+    trans: FloatProperty(
+        name="Transparency",
+        description="AC3D transparency (0-1)",
+        min=0.0,
+        max=1.0,
+        default=0.0,
+        update=_ac3d_props_update,
+    )
+
+
+class AC3D_OT_MaterialSyncFromBlender(Operator):
+    bl_idname = 'ac3d.material_sync_from_blender'
+    bl_label = 'Read Blender Material'
+    bl_description = 'Populate AC3D values from current Blender material setup'
+
+    def execute(self, context):
+        bl_mat = context.material
+        if not bl_mat:
+            return {'CANCELLED'}
+
+        props = bl_mat.ac3d_material
+        values = _ac3d_values_from_blender_material(bl_mat)
+        props.name = values['name']
+        props.rgb = values['rgb']
+        props.amb = values['amb']
+        props.emis = values['emis']
+        props.spec = values['spec']
+        props.shi = values['shi']
+        props.trans = values['trans']
+        props.use_ac3d_properties = True
+
+        self.report({'INFO'}, 'AC3D values read from Blender material')
+        return {'FINISHED'}
+
+
+class AC3D_OT_MaterialSyncToBlender(Operator):
+    bl_idname = 'ac3d.material_sync_to_blender'
+    bl_label = 'Write To Blender Material'
+    bl_description = 'Apply AC3D values to current Blender material where supported'
+
+    def execute(self, context):
+        bl_mat = context.material
+        if not bl_mat:
+            return {'CANCELLED'}
+
+        props = bl_mat.ac3d_material
+        _apply_ac3d_values_to_blender_material(bl_mat, props)
+        self.report({'INFO'}, 'AC3D values applied to Blender material')
+        return {'FINISHED'}
+
+
+class AC3D_PT_MaterialPanel(Panel):
+    bl_label = 'AC3D Material'
+    bl_idname = 'AC3D_PT_material_panel'
+    bl_space_type = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context = 'material'
+
+    @classmethod
+    def poll(cls, context):
+        return context.material is not None
+
+    def draw(self, context):
+        layout = self.layout
+        bl_mat = context.material
+        props = bl_mat.ac3d_material
+
+        layout.prop(props, 'use_ac3d_properties')
+        layout.prop(props, 'mirror_to_blender')
+
+        row = layout.row(align=True)
+        row.operator(AC3D_OT_MaterialSyncFromBlender.bl_idname, icon='IMPORT')
+        row.operator(AC3D_OT_MaterialSyncToBlender.bl_idname, icon='EXPORT')
+
+        layout.prop(props, 'name')
+        layout.prop(props, 'rgb')
+        layout.prop(props, 'amb')
+        layout.prop(props, 'emis')
+        layout.prop(props, 'spec')
+        layout.prop(props, 'shi')
+        layout.prop(props, 'trans')
 
 
 class AC3D_OT_Import(Operator, ImportHelper):
@@ -391,6 +741,10 @@ class AC3D_OT_Export(Operator, ExportHelper):
 
 
 __classes__ = (
+    AC3D_MaterialProperties,
+    AC3D_OT_MaterialSyncFromBlender,
+    AC3D_OT_MaterialSyncToBlender,
+    AC3D_PT_MaterialPanel,
     AC3D_OT_Export,
     AC3D_OT_Import,
     AC3D_OT_Message,
@@ -400,11 +754,14 @@ __classes__ = (
 def register():
     for c in __classes__:
         bpy.utils.register_class(c)
+    bpy.types.Material.ac3d_material = PointerProperty(type=AC3D_MaterialProperties)
     TOPBAR_MT_file_export.append(menu_func_export)
     TOPBAR_MT_file_import.append(menu_func_import)
 
 
 def unregister():
+    if hasattr(bpy.types.Material, 'ac3d_material'):
+        del bpy.types.Material.ac3d_material
     for c in reversed(__classes__):
         bpy.utils.unregister_class(c)
     TOPBAR_MT_file_export.remove(menu_func_export)

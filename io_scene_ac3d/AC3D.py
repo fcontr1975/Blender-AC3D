@@ -731,6 +731,18 @@ class Material:
             
             self.merge = export_config.merge_materials
 
+            ac3d_props = getattr(bl_mat, 'ac3d_material', None)
+            if ac3d_props and ac3d_props.use_ac3d_properties:
+                ac3d_name = ac3d_props.name.strip() if ac3d_props.name else ''
+                self.name = re.sub('["]', '', ac3d_name) if ac3d_name else self.name
+                self.rgb = [ac3d_props.rgb[0], ac3d_props.rgb[1], ac3d_props.rgb[2]]
+                self.amb = [ac3d_props.amb[0], ac3d_props.amb[1], ac3d_props.amb[2]]
+                self.emis = [ac3d_props.emis[0], ac3d_props.emis[1], ac3d_props.emis[2]]
+                self.spec = [ac3d_props.spec[0], ac3d_props.spec[1], ac3d_props.spec[2]]
+                self.shi = int(ac3d_props.shi)
+                self.trans = float(ac3d_props.trans)
+                return
+
             try:
                 nodes = bl_mat.node_tree.nodes
                 links = bl_mat.node_tree.links

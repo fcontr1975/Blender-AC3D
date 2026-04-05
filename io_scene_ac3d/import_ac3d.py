@@ -72,15 +72,18 @@ class AcMat:
     """Container class that defines the material properties."""
 
     def __init__(self, name, rgb, amb, emis, spec, shi, trans, import_config):
+        def _clamp01(v):
+            return max(0.0, min(1.0, float(v)))
+
         if name == "":
             name = "Default"
         self.name = re.sub('["]', '', name)  # string
-        self.rgb = rgb				# [R,G,B]
-        self.amb = amb				# [R,G,B]
-        self.emis = emis			# [R,G,B]
-        self.spec = spec			# [R,G,B]
-        self.shi = shi				# integer
-        self.trans = trans			# float
+        self.rgb = [_clamp01(c) for c in rgb]			# [R,G,B]
+        self.amb = [_clamp01(c) for c in amb]			# [R,G,B]
+        self.emis = [_clamp01(c) for c in emis]			# [R,G,B]
+        self.spec = [_clamp01(c) for c in spec]			# [R,G,B]
+        self.shi = max(0.0, min(128.0, float(shi)))			# float 0-128
+        self.trans = _clamp01(trans)			# float 0-1
 
         self.rgba = [self.rgb[0], self.rgb[1], self.rgb[2], 1.0-self.trans]#used for non-nodes
         self.rgb4 = [self.rgb[0], self.rgb[1], self.rgb[2], 1.0]#used for nodes
@@ -155,6 +158,16 @@ class AcMat:
         bsdf.inputs['Alpha'].default_value = 1.0 - self.trans
         bsdf.inputs['Base Color'].default_value = self.rgb4
         bsdf.inputs['Specular Tint'].default_value = self.spec4
+        ac3d_props = getattr(bl_mat, 'ac3d_material', None)
+        if ac3d_props:
+            ac3d_props.use_ac3d_properties = True
+            ac3d_props.name = self.name
+            ac3d_props.rgb = self.rgb
+            ac3d_props.amb = self.amb
+            ac3d_props.emis = self.emis
+            ac3d_props.spec = self.spec
+            ac3d_props.shi = int(round(self.shi))
+            ac3d_props.trans = self.trans
         #bsdf.inputs['IOR'].default_value = 1.0
         #bsdf.inputs['Transmission'].default_value = 1.0
         
@@ -582,10 +595,18 @@ class AcObj:
                         # (if there is only 1) will be assigned to every edge
                         # in the object.
                         me.materials.append(bl_material)
-            me.set_sharp_from_angle(angle=radians(self.crease))
-
             # print(len(self.vert_list))
             me.from_pydata(self.vert_list, self.edge_list, self.face_list)
+
+            crease_angle = radians(self.crease)
+            if hasattr(me, "set_sharp_from_angle"):
+                me.set_sharp_from_angle(angle=crease_angle)
+            else:
+                # Compatibility fallback for Blender builds where
+                # set_sharp_from_angle is not available.
+                if hasattr(me, "use_auto_smooth") and hasattr(me, "auto_smooth_angle"):
+                    me.use_auto_smooth = True
+                    me.auto_smooth_angle = crease_angle
 
             # set smooth flag and apply material to each face
             for no, poly in enumerate(me.polygons):
