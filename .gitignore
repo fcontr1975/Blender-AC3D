@@ -1,4 +1,8 @@
 __pycache__/
+releases/
 *.ac
 *.blend
 *~
+notes.txt
+ac3d-file-format-specification.txt
+ac3d-file-format-specifications.txt
