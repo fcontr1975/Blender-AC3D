@@ -302,6 +302,8 @@ class AcObj:
         self.bl_obj = None			# Blender object
         self.import_config = import_config
         self.hidden = False
+        self.locked = False
+        self.folded = False
 
         self.tokens = {
             'numvert':	self.read_vertices,
@@ -340,7 +342,8 @@ class AcObj:
                 if toks[0] in self.tokens.keys():
                     bDone = self.tokens[toks[0]](ac_file, toks)
                 else:
-                    bDone = True
+                    TRACE("Ignoring unsupported object token '{0}'".format(
+                        toks[0]))
 
     def read_vertices(self, ac_file, toks):
         vertex_count = int(toks[1])
@@ -392,6 +395,10 @@ class AcObj:
         # and self.import_config.hide_hidden_objects == True:
         if toks[0] == "hidden":
             self.hidden = True
+        elif toks[0] == "locked":
+            self.locked = True
+        elif toks[0] == "folded":
+            self.folded = True
         return False
 
     def read_url(self, ac_file, toks):
@@ -719,6 +726,17 @@ class AcObj:
             self.bl_obj.select_set(True)
             # bpy.ops.object.origin_set('ORIGIN_GEOMETRY', 'MEDIAN')
 
+            if len(self.data) > 0:
+                self.bl_obj['ac3d_data'] = self.data
+            if len(self.url) > 0:
+                self.bl_obj['ac3d_url'] = self.url
+            if self.locked:
+                self.bl_obj['ac3d_locked'] = True
+            if self.folded:
+                self.bl_obj['ac3d_folded'] = True
+            if self.use_crease:
+                self.bl_obj['ac3d_crease'] = float(self.crease)
+
             if self.hidden is True:
                 self.bl_obj.hide_set(True)
 
@@ -802,7 +820,8 @@ class AcSurf:
                 if toks[0] in self.tokens.keys():
                     surf_done = self.tokens[toks[0]](ac_file, toks)
                 else:
-                    surf_done = True
+                    TRACE("Ignoring unsupported surface token '{0}'".format(
+                        toks[0]))
 
     def read_surf_material(self, ac_file, tokens):
         self.mat_index = int(tokens[1])
@@ -945,7 +964,7 @@ class AC3D_OT_Import:
                 condition = False
 
         self.header = self.header.strip()
-        if len(self.header) != 5:
+        if len(self.header) < 5:
             operator.report(
                 {'ERROR'},
                 "Invalid file header length {0}: '{1}'".format(
@@ -953,9 +972,11 @@ class AC3D_OT_Import:
             ac_file.close()
             return None
 
-        # pull out the AC3D file header
+        # pull out the AC3D file header token. Some tools write a suffix
+        # after the version (e.g. "AC3DbS"), so only the first 5 chars are
+        # significant for compatibility checks.
         AC3D_header = self.header[:4]
-        AC3D_ver = self.header[4:5]
+        AC3D_ver = self.header[4]
         if AC3D_header != 'AC3D':
             operator.report(
                 {'ERROR'}, "Invalid file header: {0}".format(self.header))

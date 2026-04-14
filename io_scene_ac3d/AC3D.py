@@ -34,6 +34,46 @@ def TRACE(message):
         print(message)
 
 
+def _get_custom_bool(bl_obj, prop_name, default=False):
+    if not bl_obj:
+        return default
+    try:
+        return bool(bl_obj.get(prop_name, default))
+    except Exception:
+        return default
+
+
+def _get_custom_float(bl_obj, prop_name, default=None):
+    if not bl_obj:
+        return default
+    try:
+        value = bl_obj.get(prop_name, default)
+    except Exception:
+        return default
+
+    if value is None:
+        return default
+
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _get_custom_str(bl_obj, prop_name, default=''):
+    if not bl_obj:
+        return default
+    try:
+        value = bl_obj.get(prop_name, default)
+    except Exception:
+        return default
+
+    if value is None:
+        return default
+
+    return str(value)
+
+
 # ------------------------------------------------------------------------------
 class Object:
     """Base class for an AC3D object."""
@@ -53,6 +93,8 @@ class Object:
         self.type = ob_type
         self.bl_obj = bl_obj
         self.hidden = False
+        self.locked = False
+        self.folded = False
         self.data = ''              # custom data (eg. description)
         # custom url (use for whatever you want but never ever
         self.url = ''
@@ -65,6 +107,10 @@ class Object:
             localMatrix = bl_obj.matrix_local
             self.location = localMatrix.to_translation()  # bl_obj.location#
             self.rotation = localMatrix.to_3x3()
+            self.data = _get_custom_str(bl_obj, 'ac3d_data')
+            self.url = _get_custom_str(bl_obj, 'ac3d_url')
+            self.locked = _get_custom_bool(bl_obj, 'ac3d_locked')
+            self.folded = _get_custom_bool(bl_obj, 'ac3d_folded')
         else:
             self.location = None
             self.rotation = None
@@ -102,10 +148,16 @@ class Object:
             strm.write('{0}\n'.format(self.data))
 
         if len(self.url):
-            strm.write('url {0}\n'.format(self.url))
+            strm.write('url "{0}"\n'.format(self.url.replace('"', '')))
 
         if self.hidden:
             strm.write('hidden\n')
+
+        if self.locked:
+            strm.write('locked\n')
+
+        if self.folded:
+            strm.write('folded\n')
 
         if self.location and self.export_config.export_rot:
             # position relative to parent
@@ -174,7 +226,7 @@ class Poly(Object):
         Object.__init__(self, name, "poly", bl_obj,
                         export_config, local_transform)
 
-        self.crease = None
+        self.crease = _get_custom_float(bl_obj, 'ac3d_crease')
         self.subdiv = 0
         self.vertices = []
         self.surfaces = []
@@ -273,7 +325,7 @@ class Poly(Object):
         
         orig_mesh = self.bl_obj.data
         if (orig_mesh):
-            if (orig_mesh.name):
+            if (orig_mesh.name) and not len(self.data):
                 # quotes not allowed...
                 self.data = orig_mesh.name.replace('"', '')
                 
@@ -283,7 +335,7 @@ class Poly(Object):
         self._parseVertices(mesh)
         self._parseFaces(mesh)
 
-        if not self.crease:
+        if self.crease is None:
             self.crease = round(degrees(self.export_config.crease_angle), 3)
         
         mesh = None
@@ -534,7 +586,7 @@ class Poly(Object):
 
         if len(self.tex_name) > 0:
             strm.write('texture "{0}"\n'.format(self.tex_name))
-            if self.tex_rep[0] != 1 and self.tex_rep[1] != 1:
+            if self.tex_rep[0] != 1 or self.tex_rep[1] != 1:
                 strm.write('texrep {0} {1}\n'.format(
                     self.tex_rep[0], self.tex_rep[1]))
 
@@ -677,7 +729,8 @@ class Light (Object):
                         export_config, local_transform)
         if bl_obj.data:
             # We set the data to the type of Light, like 'SUN', 'POINT' etc..
-            self.data = bl_obj.data.type
+            if not len(self.data):
+                self.data = bl_obj.data.type
             #self.data = bl_obj.data.name.replace('"', '')
 
 # ------------------------------------------------------------------------------

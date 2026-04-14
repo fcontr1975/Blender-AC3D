@@ -49,6 +49,30 @@ Importer/exporter integration:
 - Imported AC3D materials populate this panel automatically.
 - Export can use either Blender-derived values (default) or explicit AC3D panel values.
 
+## FlightGear XML Panels
+A separate FlightGear XML workflow is available alongside the plain AC3D exporter.
+
+Scene Properties:
+- Main FlightGear XML model wrapper settings
+- Relative AC path written into the XML
+- `nopreview`, wrapper offsets, and axis-order defaults
+- Scene-level submodel definitions
+- Optional extra XML snippet via a Blender Text datablock
+
+Object Properties:
+- Per-object FlightGear effects
+- Per-object FlightGear animations
+- Per-object particle systems
+- Optional extra XML snippet via a Blender Text datablock
+
+Export:
+- `File > Export > FlightGear (.xml + .ac)` writes a FlightGear XML file and delegates `.ac` generation to the existing AC3D exporter.
+- The AC3D and FlightGear XML code paths stay separate; the FlightGear exporter calls the AC3D exporter as a black box and only adds the XML sidecar.
+- The FlightGear export dialog now includes an `XML Data` section for scene wrapper metadata plus quick helper animations for fixed scale and simple rotate/spin XML output.
+- Quick helper object targets now use searchable pickers backed by a cached scene-object list that is populated when the export dialog opens and refreshed only after scene updates.
+- Quick rotation property presets are filtered by animation type, so `rotate` and `spin` show different suggested FlightGear properties.
+- Quick rotation helper presets now include `Radar Sweep`, `Retail Sign`, `Beacon Spinner`, `Propeller`, `Main Rotor`, and `Tail Rotor`, and selecting one auto-fills the quick rotation helper values.
+
 ## AC3D versions
 AC3Db supported for import and export.
 AC3Dc supported for import.
@@ -67,6 +91,9 @@ Exporter will export all materials in object material slots, even if they are no
 ## Recent compatibility fixes
 - Importer handles AC3D material shininess values that are written as floats and safely maps them to panel properties.
 - Importer no longer requires `Mesh.set_sharp_from_angle` to exist; it falls back to auto-smooth properties when needed on older/different Blender APIs.
+- Import/export now preserve AC3D object `data`, `url`, `locked`, `folded`, and explicit `crease` values through Blender custom properties when Blender has no native field for them.
+- Importer now skips unsupported object/surface extension tokens instead of treating them as implicit end-of-section markers, which makes it more tolerant of newer AC3D dialects.
+- Exporter now emits one-axis `texrep` values correctly and always quotes `url` strings.
 
 ## Things to come:
 * I want to have an option to overwrite, or to prompt the operator if they want to overwrite textures on an export

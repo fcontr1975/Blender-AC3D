@@ -57,6 +57,12 @@ if "bpy" in locals():
         importlib.reload(import_ac3d)
     if 'export_ac3d' in locals():
         importlib.reload(export_ac3d)
+    if 'flightgear_xml_export' in locals():
+        importlib.reload(flightgear_xml_export)
+    else:
+        from . import flightgear_xml_export
+else:
+    from . import flightgear_xml_export
 
 
 def menu_func_import(self, context):
@@ -65,6 +71,10 @@ def menu_func_import(self, context):
 
 def menu_func_export(self, context):
     self.layout.operator(AC3D_OT_Export.bl_idname, text='AC3D (.ac)')
+
+
+def menu_func_export_flightgear(self, context):
+    flightgear_xml_export.menu_func_export(self, context)
 
 
 def _get_material_output_shader_node(bl_mat):
@@ -748,22 +758,26 @@ __classes__ = (
     AC3D_OT_Export,
     AC3D_OT_Import,
     AC3D_OT_Message,
-    AC3D_OT_Ok)
+    AC3D_OT_Ok) + flightgear_xml_export.CLASSES
 
 
 def register():
     for c in __classes__:
         bpy.utils.register_class(c)
     bpy.types.Material.ac3d_material = PointerProperty(type=AC3D_MaterialProperties)
+    flightgear_xml_export.register_properties()
     TOPBAR_MT_file_export.append(menu_func_export)
+    TOPBAR_MT_file_export.append(menu_func_export_flightgear)
     TOPBAR_MT_file_import.append(menu_func_import)
 
 
 def unregister():
+    flightgear_xml_export.unregister_properties()
     if hasattr(bpy.types.Material, 'ac3d_material'):
         del bpy.types.Material.ac3d_material
     for c in reversed(__classes__):
         bpy.utils.unregister_class(c)
+    TOPBAR_MT_file_export.remove(menu_func_export_flightgear)
     TOPBAR_MT_file_export.remove(menu_func_export)
     TOPBAR_MT_file_import.remove(menu_func_import)
 
