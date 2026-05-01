@@ -55,7 +55,7 @@ A separate FlightGear XML workflow is available alongside the plain AC3D exporte
 Scene Properties:
 - Main FlightGear XML model wrapper settings
 - Relative AC path written into the XML
-- `nopreview`, wrapper offsets, and axis-order defaults
+- `nopreview`, wrapper offsets, wrapper scale (`x-scale/y-scale/z-scale`), and axis-order defaults
 - Scene-level submodel definitions
 - Optional extra XML snippet via a Blender Text datablock
 
@@ -94,6 +94,8 @@ Exporter will export all materials in object material slots, even if they are no
 - Import/export now preserve AC3D object `data`, `url`, `locked`, `folded`, and explicit `crease` values through Blender custom properties when Blender has no native field for them.
 - Importer now skips unsupported object/surface extension tokens instead of treating them as implicit end-of-section markers, which makes it more tolerant of newer AC3D dialects.
 - Exporter now emits one-axis `texrep` values correctly and always quotes `url` strings.
+- FlightGear XML scene wrapper export now supports optional `x-scale`, `y-scale`, and `z-scale` model tags when scene wrapper scale differs from the default.
+- FlightGear XML quick-helper UI and export paths now guard optional operator properties more defensively to avoid stale-session attribute errors after add-on updates.
 
 ## Things to come:
 * I want to have an option to overwrite, or to prompt the operator if they want to overwrite textures on an export

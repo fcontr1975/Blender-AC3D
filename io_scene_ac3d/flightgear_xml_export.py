@@ -130,6 +130,10 @@ def _vector_is_zero(vec):
     return all(abs(float(component)) < 1e-8 for component in vec)
 
 
+def _vector_is_one(vec):
+    return all(abs(float(component) - 1.0) < 1e-8 for component in vec)
+
+
 def _append_text(parent, tag, value):
     if value is None:
         return None
@@ -169,6 +173,14 @@ def _append_center(parent, center):
     _append_float(center_node, 'x-m', center[0])
     _append_float(center_node, 'y-m', center[1])
     _append_float(center_node, 'z-m', center[2])
+
+
+def _append_model_scale(parent, scale):
+    if _vector_is_one(scale):
+        return
+    _append_float(parent, 'x-scale', scale[0])
+    _append_float(parent, 'y-scale', scale[1])
+    _append_float(parent, 'z-scale', scale[2])
 
 
 def _append_axis(parent, item):
@@ -419,7 +431,7 @@ class FGSubmodelItem(PropertyGroup):
 class FGSceneProperties(PropertyGroup):
     enabled: BoolProperty(
         name='Use Scene XML Data',
-        description='Include scene-level FlightGear XML metadata such as wrapper offsets and submodels',
+        description='Include scene-level FlightGear XML metadata such as wrapper offsets, scale, and submodels',
         default=True)
     ac_path: StringProperty(
         name='AC Path',
@@ -430,6 +442,11 @@ class FGSceneProperties(PropertyGroup):
         name='Offsets', subtype='TRANSLATION', default=(0.0, 0.0, 0.0), size=3)
     offsets_rotation: FloatVectorProperty(
         name='Rotation', subtype='XYZ', default=(0.0, 0.0, 0.0), size=3)
+    model_scale: FloatVectorProperty(
+        name='Scale',
+        description='Scale written to <model> as x-scale/y-scale/z-scale',
+        default=(1.0, 1.0, 1.0),
+        size=3)
     defaults_axis_order: EnumProperty(
         name='Axis Defaults', items=DEFAULT_AXIS_ORDER, default='none')
     extra_xml_text: PointerProperty(name='Extra XML Snippet', type=bpy.types.Text)
@@ -680,6 +697,19 @@ class FG_OT_Export(Operator, ExportHelper):
         default=(0.0, 0.0, 0.0),
         size=3)
 
+    def _has_operator_property(self, property_name):
+        try:
+            self.path_resolve(property_name, False)
+            return True
+        except (AttributeError, TypeError, ValueError):
+            return False
+
+    def _prop_if_available(self, layout, property_name):
+        if self._has_operator_property(property_name):
+            layout.prop(self, property_name)
+            return True
+        return False
+
     def draw(self, context):
         layout = self.layout
         scene_props = context.scene.flightgear_xml
@@ -711,31 +741,34 @@ class FG_OT_Export(Operator, ExportHelper):
         scene_col.prop(scene_props, 'defaults_axis_order')
         scene_col.prop(scene_props, 'offsets_location')
         scene_col.prop(scene_props, 'offsets_rotation')
+        scene_col.prop(scene_props, 'model_scale')
 
         helper_box = xml_box.box()
         helper_box.label(text='Quick XML Helpers')
-        helper_box.prop(self, 'xml_add_scale')
-        if self.xml_add_scale:
-            helper_box.prop(self, 'xml_scale_object_choice')
-            if self.xml_scale_object_choice == '__CUSTOM__':
-                helper_box.prop(self, 'xml_scale_object_custom')
-            helper_box.prop(self, 'xml_scale_factors')
-            helper_box.prop(self, 'xml_scale_center')
+        has_scale_toggle = self._prop_if_available(helper_box, 'xml_add_scale')
+        if has_scale_toggle and getattr(self, 'xml_add_scale', False):
+            has_scale_choice = self._prop_if_available(helper_box, 'xml_scale_object_choice')
+            if has_scale_choice and getattr(self, 'xml_scale_object_choice', '') == '__CUSTOM__':
+                self._prop_if_available(helper_box, 'xml_scale_object_custom')
+            self._prop_if_available(helper_box, 'xml_scale_factors')
+            self._prop_if_available(helper_box, 'xml_scale_center')
 
-        helper_box.prop(self, 'xml_add_rotation')
-        if self.xml_add_rotation:
-            helper_box.prop(self, 'xml_rotation_type')
-            helper_box.prop(self, 'xml_rotation_object_choice')
-            if self.xml_rotation_object_choice == '__CUSTOM__':
-                helper_box.prop(self, 'xml_rotation_object_custom')
-            helper_box.prop(self, 'xml_rotation_property_choice')
-            if self.xml_rotation_property_choice == '__CUSTOM__':
-                helper_box.prop(self, 'xml_rotation_property_custom')
-            helper_box.prop(self, 'xml_rotation_factor')
-            if self.xml_rotation_type == 'rotate':
-                helper_box.prop(self, 'xml_rotation_offset_deg')
-            helper_box.prop(self, 'xml_rotation_axis')
-            helper_box.prop(self, 'xml_rotation_center')
+        has_rotation_toggle = self._prop_if_available(helper_box, 'xml_add_rotation')
+        if not has_rotation_toggle:
+            helper_box.label(text='Rotation helper unavailable. Reload add-on.', icon='ERROR')
+        elif getattr(self, 'xml_add_rotation', False):
+            self._prop_if_available(helper_box, 'xml_rotation_type')
+            has_rotation_choice = self._prop_if_available(helper_box, 'xml_rotation_object_choice')
+            if has_rotation_choice and getattr(self, 'xml_rotation_object_choice', '') == '__CUSTOM__':
+                self._prop_if_available(helper_box, 'xml_rotation_object_custom')
+            has_rotation_property = self._prop_if_available(helper_box, 'xml_rotation_property_choice')
+            if has_rotation_property and getattr(self, 'xml_rotation_property_choice', '') == '__CUSTOM__':
+                self._prop_if_available(helper_box, 'xml_rotation_property_custom')
+            self._prop_if_available(helper_box, 'xml_rotation_factor')
+            if getattr(self, 'xml_rotation_type', 'rotate') == 'rotate':
+                self._prop_if_available(helper_box, 'xml_rotation_offset_deg')
+            self._prop_if_available(helper_box, 'xml_rotation_axis')
+            self._prop_if_available(helper_box, 'xml_rotation_center')
 
     def execute(self, context):
         if context.active_object and context.active_object.mode == 'EDIT':
@@ -814,9 +847,10 @@ class FG_OT_Export(Operator, ExportHelper):
         return choice.strip()
 
     def _resolve_rotation_property(self):
-        if self.xml_rotation_property_choice == '__CUSTOM__':
-            return self.xml_rotation_property_custom.strip()
-        return self.xml_rotation_property_choice.strip()
+        property_choice = getattr(self, 'xml_rotation_property_choice', '')
+        if property_choice == '__CUSTOM__':
+            return getattr(self, 'xml_rotation_property_custom', '').strip()
+        return property_choice.strip()
 
     def _append_quick_xml_data(self, context, root):
         if self.xml_add_scale:
@@ -835,11 +869,11 @@ class FG_OT_Export(Operator, ExportHelper):
                 _append_float(animation_node, 'z-offset', self.xml_scale_factors[2])
                 _append_center(animation_node, self.xml_scale_center)
 
-        if self.xml_add_rotation:
+        if getattr(self, 'xml_add_rotation', False):
             target_name = self._resolve_target_object_name(
                 context,
-                self.xml_rotation_object_choice,
-                self.xml_rotation_object_custom)
+                getattr(self, 'xml_rotation_object_choice', '__ACTIVE__'),
+                getattr(self, 'xml_rotation_object_custom', ''))
             property_path = self._resolve_rotation_property()
             if not target_name:
                 self._warn('Skipping quick rotation animation because no target object name was provided.')
@@ -847,19 +881,24 @@ class FG_OT_Export(Operator, ExportHelper):
                 self._warn('Skipping quick rotation animation because no FlightGear property path was provided.')
             else:
                 animation_node = ET.SubElement(root, 'animation')
-                _append_text(animation_node, 'type', self.xml_rotation_type)
+                _append_text(animation_node, 'type', getattr(self, 'xml_rotation_type', 'rotate'))
                 _append_text(animation_node, 'object-name', target_name)
                 _append_text(animation_node, 'property', property_path)
-                if abs(self.xml_rotation_factor - 1.0) > 1e-8:
-                    _append_float(animation_node, 'factor', self.xml_rotation_factor)
-                if self.xml_rotation_type == 'rotate' and abs(self.xml_rotation_offset_deg) > 1e-8:
-                    _append_float(animation_node, 'offset-deg', self.xml_rotation_offset_deg)
+                rotation_factor = getattr(self, 'xml_rotation_factor', 1.0)
+                if abs(rotation_factor - 1.0) > 1e-8:
+                    _append_float(animation_node, 'factor', rotation_factor)
+
+                rotation_type = getattr(self, 'xml_rotation_type', 'rotate')
+                rotation_offset = getattr(self, 'xml_rotation_offset_deg', 0.0)
+                if rotation_type == 'rotate' and abs(rotation_offset) > 1e-8:
+                    _append_float(animation_node, 'offset-deg', rotation_offset)
 
                 axis = ET.SubElement(animation_node, 'axis')
-                _append_float(axis, 'x', self.xml_rotation_axis[0])
-                _append_float(axis, 'y', self.xml_rotation_axis[1])
-                _append_float(axis, 'z', self.xml_rotation_axis[2])
-                _append_center(animation_node, self.xml_rotation_center)
+                rotation_axis = getattr(self, 'xml_rotation_axis', (0.0, 1.0, 0.0))
+                _append_float(axis, 'x', rotation_axis[0])
+                _append_float(axis, 'y', rotation_axis[1])
+                _append_float(axis, 'z', rotation_axis[2])
+                _append_center(animation_node, getattr(self, 'xml_rotation_center', (0.0, 0.0, 0.0)))
 
     def _build_xml_document(self, context, ac_xml_path):
         scene_props = context.scene.flightgear_xml
@@ -880,6 +919,7 @@ class FG_OT_Export(Operator, ExportHelper):
             _append_offsets(model,
                             scene_props.offsets_location,
                             scene_props.offsets_rotation)
+            _append_model_scale(model, scene_props.model_scale)
 
         for obj in _iter_export_objects(context, self.use_selection):
             props = obj.flightgear_xml
@@ -1083,6 +1123,7 @@ class FG_PT_ScenePanel(Panel):
         layout.prop(props, 'defaults_axis_order')
         layout.prop(props, 'offsets_location')
         layout.prop(props, 'offsets_rotation')
+        layout.prop(props, 'model_scale')
         layout.template_ID(props, 'extra_xml_text', new='text.new')
 
 
